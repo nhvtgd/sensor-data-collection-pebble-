@@ -1,0 +1,136 @@
+#include <pebble.h>
+
+#define NUM_MENU_ICONS 3
+#define NUM_ITEMS 3
+#define NUM_SECTIONS 1
+static Window *window;
+
+static MenuLayer *menu_layer;
+
+static GBitmap *menu_icons[NUM_MENU_ICONS];
+
+static TextLayer *text_layer;
+
+static TextLayer *recording_time;
+
+static const char* const activity_list[] = {"Running", "Walking", "Custom Activity"};
+
+// startting time for the counter
+static int s_uptime = 0;
+
+void initialize_icon() {
+  int num_menu_icons = 0;
+  menu_icons[num_menu_icons++] = gbitmap_create_with_resource(RESOURCE_ID_RUNNING);
+  menu_icons[num_menu_icons++] = gbitmap_create_with_resource(RESOURCE_ID_WALKING);
+  menu_icons[num_menu_icons++] = gbitmap_create_with_resource(RESOURCE_ID_ADD_ACTIVITY);
+}
+
+static uint16_t menu_get_num_sections_callback(MenuLayer *menu_layer, void *data) {
+  return NUM_SECTIONS;
+}
+
+static uint16_t menu_get_num_rows_callback(MenuLayer *menu_layer, uint16_t section_index, void *data) {
+  return NUM_ITEMS;
+}
+
+static void menu_draw_row_callback(GContext* ctx, const Layer *cell_layer, MenuIndex *cell_index, void *data) {
+  // Use the row to specify which item we'll draw
+  menu_cell_basic_draw(ctx, cell_layer, activity_list[cell_index->row], NULL, menu_icons[cell_index->row]);
+}
+
+static void handle_tick(struct tm *tick_time, TimeUnits units_changed) {
+    static char s_uptime_buffer[32];
+
+    // Get time since launch
+    int seconds = s_uptime % 60;
+    int minutes = (s_uptime % 3600) / 60;
+    int hours = s_uptime / 3600;
+
+    // Update the TextLayer
+    snprintf(s_uptime_buffer, sizeof(s_uptime_buffer), "Uptime: %dh %dm %ds", hours, minutes, seconds);
+    text_layer_set_text(recording_time, s_uptime_buffer);
+
+    // Increment s_uptime
+    s_uptime++;  
+}
+
+void menu_select_callback(MenuLayer *menu_layer, MenuIndex *cell_index, void *data) {
+  layer_set_hidden(text_layer_get_layer(text_layer), false);
+  tick_timer_service_subscribe(SECOND_UNIT, &handle_tick);
+  text_layer_set_text(text_layer, activity_list[cell_index->row]);
+}
+
+void menu_layer_init(GRect bounds) {
+  initialize_icon();
+
+   // get the menu layer
+  menu_layer = menu_layer_create(bounds);
+  menu_layer_set_callbacks(menu_layer, NULL, (MenuLayerCallbacks){
+    .get_num_sections = menu_get_num_sections_callback,
+    .get_num_rows = menu_get_num_rows_callback,
+    .draw_row = menu_draw_row_callback,
+    .select_click = menu_select_callback,
+  });
+
+  menu_layer_set_click_config_onto_window(menu_layer, window);
+}
+
+
+void text_layer_init(GRect bounds) {
+  text_layer = text_layer_create(bounds);
+  layer_set_hidden(text_layer_get_layer(text_layer), true);
+  text_layer_set_font(text_layer, fonts_get_system_font(FONT_KEY_GOTHIC_24_BOLD));
+  text_layer_set_text_alignment(text_layer, GTextAlignmentCenter);
+}
+
+void timer_layer_init(GRect bounds) {
+  recording_time = text_layer_create(bounds);
+  text_layer_set_font(recording_time, FONT_KEY_GOTHIC_24_BOLD);
+  text_layer_set_text_alignment(recording_time, GTextAlignmentCenter);
+}
+
+void window_load(Window *window) {
+  Layer *window_layer = window_get_root_layer(window);
+  GRect bounds = layer_get_frame(window_layer);
+  
+  menu_layer_init(GRect(0,0, bounds.size.w, bounds.size.h/2));
+  text_layer_init(GRect(0,bounds.size.h/2, bounds.size.w, bounds.size.h/4));
+  timer_layer_init(GRect(0,bounds.size.h*3/4, bounds.size.w, bounds.size.h/4));  
+  layer_add_child(window_layer, text_layer_get_layer(text_layer));
+  layer_add_child(window_layer, text_layer_get_layer(recording_time));
+  layer_add_child(window_layer, menu_layer_get_layer(menu_layer));  
+}
+
+void window_unload(Window *window) {
+  // Destroy the menu layer
+  menu_layer_destroy(menu_layer);
+  
+  // Destroy the text layer
+  text_layer_destroy(text_layer);
+
+  // Destory the timer layer
+  text_layer_destroy(recording_time);
+
+  // unsubscribe timer service
+  tick_timer_service_unsubscribe();
+  // Cleanup the menu icons
+  for (int i = 0; i < NUM_MENU_ICONS; i++) {
+    gbitmap_destroy(menu_icons[i]);
+  } 
+}
+
+int main(void) {
+  window = window_create();
+
+  // Setup the window handlers
+  window_set_window_handlers(window, (WindowHandlers) {
+    .load = window_load,
+    .unload = window_unload,
+  });
+
+  window_stack_push(window, true );
+
+  app_event_loop();
+
+  window_destroy(window);
+}
