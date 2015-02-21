@@ -1,0 +1,35 @@
+{
+    "appKeys": {},
+    "capabilities": [
+        ""
+    ],
+    "companyName": "nhvtgd@gmail.com",
+    "longName": "SuperUROP",
+    "projectType": "native",
+    "resources": {
+        "media": [
+            {
+                "file": "images/add_activity.png",
+                "name": "ADD_ACTIVITY",
+                "type": "png"
+            },
+            {
+                "file": "images/walking.png",
+                "name": "WALKING",
+                "type": "png"
+            },
+            {
+                "file": "images/running.png",
+                "name": "RUNNING",
+                "type": "png"
+            }
+        ]
+    },
+    "shortName": "SuperUROP",
+    "uuid": "2834fa63-f127-494d-a231-c933bf0721d2",
+    "versionCode": 1,
+    "versionLabel": "1.0",
+    "watchapp": {
+        "watchface": false
+    }
+}
