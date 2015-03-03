@@ -22,6 +22,11 @@
                 "file": "images/running.png",
                 "name": "RUNNING",
                 "type": "png"
+            },
+			{
+                "file": "images/saved_activity.png",
+                "name": "SAVED_ACTIVITY",
+                "type": "png"
             }
         ]
     },

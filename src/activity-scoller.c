@@ -1,9 +1,10 @@
 #include <pebble.h>
 #include <inttypes.h>
+#include <time.h>
 
-#define NUM_MENU_ICONS 3
-#define NUM_ITEMS 3
-#define NUM_SECTIONS 1
+#define NUM_MENU_ICONS 4
+#define NUM_DEFAULT_ITEMS 3
+#define NUM_SECTIONS 2
 #define SAMPLE_BATCH 18
 
 static Window *window;
@@ -19,12 +20,22 @@ static const char* const activity_list[] = {"Running", "Walking", "Custom Activi
 static const char* const TIME_FORMAT_RECORDING =  "%02d:%02d:%02d Recording";
 
 static const char* const TIME_FORMAT_IDLE =  "%02d:%02d:%02d Stop";
+
+// constant to recognize phone signal to save activity
+static const uint32_t const SAVE_ACTIVITY = 3;
+
+// constant to recognize phone signal to select activity but don't save
+static const uint32_t const NO_SAVE_ACTIVITY = 2;
+
+static int num_save_items = 0;
+
 // startting time for the counter
 static int s_uptime = 0;
 
 static char s_uptime_buffer[48];
 
-bool is_start;
+// check if we are currently recording data
+bool is_recording;
 
 // Data logging session
 DataLoggingSessionRef accel_log;
@@ -53,12 +64,15 @@ void init_dlog(void) {
      /* DataLogType */ DATA_LOGGING_BYTE_ARRAY,
      /* length */        sizeof(AccelDataMod)*SAMPLE_BATCH,
      /* resume */        false );
-   APP_LOG(APP_LOG_LEVEL_DEBUG, "==> create log");
+  //APP_LOG(APP_LOG_LEVEL_DEBUG, "==> create log");
    accel_service_set_sampling_rate(ACCEL_SAMPLING_50HZ);
 }
 
 // boolean to denote dumping process
 static bool is_dumping;
+
+// how long we have been recording
+static time_t startTime;
 
 void send_signal(uint8_t key, uint8_t cmd) {
   DictionaryIterator *iter;
@@ -103,13 +117,18 @@ static void accel_data_handler(AccelData *data, uint32_t num_samples) {
 	  modData->label = current_label;
 	  char buffer[32];
 	  snprintf(buffer, sizeof(buffer), "dump %d ,%d, %d", data->x, data->y, data->z);
-	  APP_LOG(APP_LOG_LEVEL_DEBUG, buffer);
+	  //APP_LOG(APP_LOG_LEVEL_DEBUG, buffer);
 	  data ++; // move to the next data point of AccelData struct
 	  modData ++; // move to the next data point of AccelDataMod struct
 	  count += 1;
 	}
 	DataLoggingResult r = data_logging_log(accel_log, accel_mod, 1);
-	APP_LOG(APP_LOG_LEVEL_DEBUG, getStatus(r));
+	APP_LOG(APP_LOG_LEVEL_DEBUG, "STATUS %s", getStatus(r));
+	if (r != DATA_LOGGING_SUCCESS) {
+	  time_t offTime;
+	  offTime = time(NULL);
+	  APP_LOG(APP_LOG_LEVEL_DEBUG, "Status: %s Starting time is %ld, Current time is %ld", getStatus(r), startTime, offTime);
+	}
   }
 }
 
@@ -118,6 +137,7 @@ void initialize_icon() {
   menu_icons[num_menu_icons++] = gbitmap_create_with_resource(RESOURCE_ID_RUNNING);
   menu_icons[num_menu_icons++] = gbitmap_create_with_resource(RESOURCE_ID_WALKING);
   menu_icons[num_menu_icons++] = gbitmap_create_with_resource(RESOURCE_ID_ADD_ACTIVITY);
+  menu_icons[num_menu_icons++] = gbitmap_create_with_resource(RESOURCE_ID_SAVED_ACTIVITY);
 }
 
 static uint16_t menu_get_num_sections_callback(MenuLayer *menu_layer, void *data) {
@@ -125,16 +145,56 @@ static uint16_t menu_get_num_sections_callback(MenuLayer *menu_layer, void *data
 }
 
 static uint16_t menu_get_num_rows_callback(MenuLayer *menu_layer, uint16_t section_index, void *data) {
-  return NUM_ITEMS;
+   switch (section_index) {
+     case 0:
+       return NUM_DEFAULT_ITEMS;
+
+     case 1:
+       return num_save_items;
+
+     default:
+       return 0;
+   }
+}
+
+// A callback is used to specify the height of the section header
+static int16_t menu_get_header_height_callback(MenuLayer *menu_layer, uint16_t section_index, void *data) {
+  // This is a define provided in pebble.h that you may use for the default height
+  return MENU_CELL_BASIC_HEADER_HEIGHT;
+}
+
+static void menu_draw_header_callback(GContext* ctx, const Layer *cell_layer, uint16_t section_index, void *data) {
+  // Determine which section we're working with
+  switch (section_index) {
+    case 0:
+      menu_cell_basic_header_draw(ctx, cell_layer, "Default Activity");
+      break;
+
+    case 1:
+      menu_cell_basic_header_draw(ctx, cell_layer, "Saved Activity");
+      break;
+  }
 }
 
 static void menu_draw_row_callback(GContext* ctx, const Layer *cell_layer, MenuIndex *cell_index, void *data) {
   // Use the row to specify which item we'll draw
-  menu_cell_basic_draw(ctx, cell_layer, activity_list[cell_index->row], NULL, menu_icons[cell_index->row]);
+  switch (cell_index->section) {
+    case 0:
+	  menu_cell_basic_draw(ctx, cell_layer, activity_list[cell_index->row], NULL, menu_icons[cell_index->row]);
+      break;
+    case 1:
+	  if (persist_exists(SAVE_ACTIVITY)) {
+		//APP_LOG(APP_LOG_LEVEL_DEBUG, "drawing %d", cell_index->row);
+		char buffer[48];
+		persist_read_string(SAVE_ACTIVITY, buffer, sizeof(buffer));
+		menu_cell_basic_draw(ctx, cell_layer, buffer, NULL, menu_icons[SAVE_ACTIVITY]);
+	  }
+      break;
+  }
 }
 
 static void handle_tick(struct tm *tick_time, TimeUnits units_changed) {
-  APP_LOG(APP_LOG_LEVEL_DEBUG, "==> ticking log");
+  //APP_LOG(APP_LOG_LEVEL_DEBUG, "==> ticking log");
 
     // Get time since launch
     int seconds = s_uptime % 60;
@@ -150,59 +210,76 @@ static void handle_tick(struct tm *tick_time, TimeUnits units_changed) {
 
 	// we don't want to continually send the data points
 	// so try to dump the data every two minutes.
-	
 	if (minutes != 0 && minutes % 2 == 0) {
+	  if (is_dumping) { // is currently dumping data, and 2 minutes up, reinitialize the log and force storing on the watch
+		is_dumping = false;
+		init_dlog();
+	  } else { // dump to the phone
 		is_dumping = true;
 		data_logging_finish(accel_log);
-	} else {
-	    is_dumping = false;
-		init_dlog();
-		}
+	  }
+	}
+}
+
+void _subscribe_activity(int label) {
+  tick_timer_service_subscribe(SECOND_UNIT, &handle_tick);
+  accel_data_service_subscribe(SAMPLE_BATCH, &accel_data_handler);
+  current_label = label;
+  is_recording = true;
+  init_dlog(); // create new logging instance since we can't log to same instance after calling finish
 }
 
 // This is to receive message back from phone
 static void in_received_handler(DictionaryIterator *iter, void *context)
 {
-  APP_LOG(APP_LOG_LEVEL_DEBUG, "==> receive message back");
+  //APP_LOG(APP_LOG_LEVEL_DEBUG, "==> receive message back");
     Tuple *t = dict_read_first(iter);
     if(t)
     {
         vibes_short_pulse();
+		if (t->key == SAVE_ACTIVITY) {
+		  //APP_LOG(APP_LOG_LEVEL_DEBUG, "write persistent %s", (const char*)t->value->data);
+		  persist_write_string(SAVE_ACTIVITY, (const char*)t->value->data);
+		  num_save_items += 1;
+		  layer_mark_dirty(menu_layer_get_layer(menu_layer));
+		  menu_layer_reload_data(menu_layer);
+		}
+		
+		//APP_LOG(APP_LOG_LEVEL_DEBUG, "receiving %"PRIu32" %s\n", t->key, (const char*) t->value->data);
+		// refresh the view 
 		is_received_activity = true;
-		tick_timer_service_subscribe(SECOND_UNIT, &handle_tick);
-		accel_data_service_subscribe(SAMPLE_BATCH, &accel_data_handler);
-		current_label = 2;
-		is_start = true;
-		init_dlog(); // create new logging instance since we can't log to same instance after calling finish
+		_subscribe_activity(2); // Customized Activity Label is 2
     }
 }
 
 // This function is to handle when the middle button is pressed
 void menu_select_callback(MenuLayer *menu_layer, MenuIndex *cell_index, void *data) {
-  // if already started, meanning the user wants to stop recording
-  if (is_start) {
+  // if already recording, meanning the user wants to stop recording
+  if (is_recording) {
 	tick_timer_service_unsubscribe(); // stop the call back
 	accel_data_service_unsubscribe();
 	snprintf(s_uptime_buffer, sizeof(s_uptime_buffer), TIME_FORMAT_IDLE,0, 0 , 0); // reinitialize the time
 	text_layer_set_text(text_layer, s_uptime_buffer); // set the timer
-	is_start = false;
+	is_recording = false;
 	data_logging_finish(accel_log); // finishing logging that activit
-	APP_LOG(APP_LOG_LEVEL_DEBUG, "==> finish logging session");
+	//APP_LOG(APP_LOG_LEVEL_DEBUG, "==> finish logging session");
 	is_received_activity = false; // reset the state of receive data from phone
   } else {	// otherwise, start subscribing it again
 	 if (cell_index->row == 2) {
-		APP_LOG(APP_LOG_LEVEL_DEBUG, "==> before sending signal");
+	   //APP_LOG(APP_LOG_LEVEL_DEBUG, "==> before sending signal");
 		send_signal(0,1);
 		if (!is_received_activity) {
 		  text_layer_set_text(text_layer, "Please Select Activity on Your Phone");
 		  return;
 		}
 	 }
-	tick_timer_service_subscribe(SECOND_UNIT, &handle_tick);
-	accel_data_service_subscribe(SAMPLE_BATCH, &accel_data_handler);
-	current_label = cell_index->row;
-	is_start = true;
-	init_dlog(); // create new logging instance since we can't log to same instance after calling finish
+	 switch(cell_index->section) {
+	 case 0:
+	   _subscribe_activity(cell_index->row);
+	   break;
+	 case 1:
+	   _subscribe_activity(SAVE_ACTIVITY);
+	 }
   }
   s_uptime = 0;
   is_dumping = false;
@@ -216,13 +293,14 @@ void menu_layer_init(GRect bounds) {
   menu_layer_set_callbacks(menu_layer, NULL, (MenuLayerCallbacks){
     .get_num_sections = menu_get_num_sections_callback,
     .get_num_rows = menu_get_num_rows_callback,
+	.get_header_height = menu_get_header_height_callback,
+	.draw_header = menu_draw_header_callback,
     .draw_row = menu_draw_row_callback,
     .select_click = menu_select_callback,
   });
 
   menu_layer_set_click_config_onto_window(menu_layer, window);
 }
-
 
 void text_layer_init(GRect bounds) {
   // set the text layer for the phone
@@ -278,6 +356,8 @@ int main(void) {
   // reigster app message to send message to phone.
   app_message_register_inbox_received(in_received_handler);
   app_message_open(512, 512);
+
+  startTime = time(NULL);
 
   app_event_loop();
 
