@@ -64,7 +64,7 @@ void init_dlog(void) {
      /* DataLogType */ DATA_LOGGING_BYTE_ARRAY,
      /* length */        sizeof(AccelDataMod)*SAMPLE_BATCH,
      /* resume */        false );
-  //APP_LOG(APP_LOG_LEVEL_DEBUG, "==> create log");
+  APP_LOG(APP_LOG_LEVEL_DEBUG, "==> create log");
    accel_service_set_sampling_rate(ACCEL_SAMPLING_50HZ);
 }
 
@@ -117,7 +117,7 @@ static void accel_data_handler(AccelData *data, uint32_t num_samples) {
 	  modData->label = current_label;
 	  char buffer[32];
 	  snprintf(buffer, sizeof(buffer), "dump %d ,%d, %d", data->x, data->y, data->z);
-	  //APP_LOG(APP_LOG_LEVEL_DEBUG, buffer);
+	  APP_LOG(APP_LOG_LEVEL_DEBUG, buffer);
 	  data ++; // move to the next data point of AccelData struct
 	  modData ++; // move to the next data point of AccelDataMod struct
 	  count += 1;
@@ -184,7 +184,7 @@ static void menu_draw_row_callback(GContext* ctx, const Layer *cell_layer, MenuI
       break;
     case 1:
 	  if (persist_exists(SAVE_ACTIVITY)) {
-		//APP_LOG(APP_LOG_LEVEL_DEBUG, "drawing %d", cell_index->row);
+		APP_LOG(APP_LOG_LEVEL_DEBUG, "drawing %d", cell_index->row);
 		char buffer[48];
 		persist_read_string(SAVE_ACTIVITY, buffer, sizeof(buffer));
 		menu_cell_basic_draw(ctx, cell_layer, buffer, NULL, menu_icons[SAVE_ACTIVITY]);
@@ -194,7 +194,7 @@ static void menu_draw_row_callback(GContext* ctx, const Layer *cell_layer, MenuI
 }
 
 static void handle_tick(struct tm *tick_time, TimeUnits units_changed) {
-  //APP_LOG(APP_LOG_LEVEL_DEBUG, "==> ticking log");
+    APP_LOG(APP_LOG_LEVEL_DEBUG, "==> ticking log");
 
     // Get time since launch
     int seconds = s_uptime % 60;
@@ -209,8 +209,8 @@ static void handle_tick(struct tm *tick_time, TimeUnits units_changed) {
     s_uptime++;
 
 	// we don't want to continually send the data points
-	// so try to dump the data every two minutes.
-	if (minutes != 0 && minutes % 2 == 0) {
+	// so try to dump the data every two minutes or 120 ticks.
+	if (s_uptime % 120 == 0) {
 	  if (is_dumping) { // is currently dumping data, and 2 minutes up, reinitialize the log and force storing on the watch
 		is_dumping = false;
 		init_dlog();
@@ -232,20 +232,20 @@ void _subscribe_activity(int label) {
 // This is to receive message back from phone
 static void in_received_handler(DictionaryIterator *iter, void *context)
 {
-  //APP_LOG(APP_LOG_LEVEL_DEBUG, "==> receive message back");
+    APP_LOG(APP_LOG_LEVEL_DEBUG, "==> receive message back");
     Tuple *t = dict_read_first(iter);
     if(t)
     {
         vibes_short_pulse();
 		if (t->key == SAVE_ACTIVITY) {
-		  //APP_LOG(APP_LOG_LEVEL_DEBUG, "write persistent %s", (const char*)t->value->data);
+		  APP_LOG(APP_LOG_LEVEL_DEBUG, "write persistent %s", (const char*)t->value->data);
 		  persist_write_string(SAVE_ACTIVITY, (const char*)t->value->data);
 		  num_save_items += 1;
 		  layer_mark_dirty(menu_layer_get_layer(menu_layer));
 		  menu_layer_reload_data(menu_layer);
 		}
 		
-		//APP_LOG(APP_LOG_LEVEL_DEBUG, "receiving %"PRIu32" %s\n", t->key, (const char*) t->value->data);
+		APP_LOG(APP_LOG_LEVEL_DEBUG, "receiving %"PRIu32" %s\n", t->key, (const char*) t->value->data);
 		// refresh the view 
 		is_received_activity = true;
 		_subscribe_activity(2); // Customized Activity Label is 2
@@ -262,11 +262,11 @@ void menu_select_callback(MenuLayer *menu_layer, MenuIndex *cell_index, void *da
 	text_layer_set_text(text_layer, s_uptime_buffer); // set the timer
 	is_recording = false;
 	data_logging_finish(accel_log); // finishing logging that activit
-	//APP_LOG(APP_LOG_LEVEL_DEBUG, "==> finish logging session");
+	APP_LOG(APP_LOG_LEVEL_DEBUG, "==> finish logging session");
 	is_received_activity = false; // reset the state of receive data from phone
   } else {	// otherwise, start subscribing it again
 	 if (cell_index->row == 2) {
-	   //APP_LOG(APP_LOG_LEVEL_DEBUG, "==> before sending signal");
+	   APP_LOG(APP_LOG_LEVEL_DEBUG, "==> before sending signal");
 		send_signal(0,1);
 		if (!is_received_activity) {
 		  text_layer_set_text(text_layer, "Please Select Activity on Your Phone");
