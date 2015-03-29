@@ -6,6 +6,8 @@
 #define NUM_DEFAULT_ITEMS 3
 #define NUM_SECTIONS 2
 #define SAMPLE_BATCH 18
+#define STOP_SIGNAL 0xFFFF
+#define START_SIGNAL 0x0000
 
 static Window *window;
 
@@ -74,15 +76,18 @@ static bool is_dumping;
 // how long we have been recording
 static time_t startTime;
 
-void send_signal(uint8_t key, uint8_t cmd) {
+void send_signal(int signal) {
   DictionaryIterator *iter;
-  app_message_outbox_begin(&iter);
 
-  Tuplet value = TupletInteger(key, cmd);
-  dict_write_tuplet(iter, &value);
+  app_message_outbox_begin(&iter);
+  
+  dict_write_int32(iter, signal, 1);
 
   app_message_outbox_send();
+
 }
+
+
 
 const char* getStatus(DataLoggingResult result)
 {
@@ -145,7 +150,6 @@ static uint16_t menu_get_num_sections_callback(MenuLayer *menu_layer, void *data
 }
 
 static uint16_t menu_get_num_rows_callback(MenuLayer *menu_layer, uint16_t section_index, void *data) {
-  return NUM_ITEMS;
    switch (section_index) {
      case 0:
        return NUM_DEFAULT_ITEMS;
@@ -220,7 +224,7 @@ void _subscribe_activity(int label) {
 }
 
 // This is to receive message back from phone
-static void in_received_handler(DictionaryIterator *iter, void *context)
+static void inbox_received_callback(DictionaryIterator *iter, void *context)
 {
     APP_LOG(APP_LOG_LEVEL_DEBUG, "==> receive message back");
     Tuple *t = dict_read_first(iter);
@@ -239,8 +243,22 @@ static void in_received_handler(DictionaryIterator *iter, void *context)
 		// refresh the view 
 		is_received_activity = true;
 		_subscribe_activity(2); // Customized Activity Label is 2
+		send_signal(START_SIGNAL);
     }
 }
+
+static void inbox_dropped_callback(AppMessageResult reason, void *context) {
+  APP_LOG(APP_LOG_LEVEL_ERROR, "Message dropped!");
+}
+
+static void outbox_failed_callback(DictionaryIterator *iterator, AppMessageResult reason, void *context) {
+  APP_LOG(APP_LOG_LEVEL_ERROR, "Outbox send failed!");
+}
+
+static void outbox_sent_callback(DictionaryIterator *iterator, void *context) {
+  APP_LOG(APP_LOG_LEVEL_INFO, "Outbox send success!");
+}
+
 
 // This function is to handle when the middle button is pressed
 void menu_select_callback(MenuLayer *menu_layer, MenuIndex *cell_index, void *data) {
@@ -254,12 +272,14 @@ void menu_select_callback(MenuLayer *menu_layer, MenuIndex *cell_index, void *da
 
 	data_logging_finish(accel_log); // finishing logging that activit
 
+	// send stop signal as APP_MESSAGE to prevent the loggin app to be full
+	send_signal(STOP_SIGNAL);
+
 	APP_LOG(APP_LOG_LEVEL_DEBUG, "==> finish logging session");
 	is_received_activity = false; // reset the state of receive data from phone
   } else {	// otherwise, start subscribing it again
 	 if (cell_index->row == 2) {
 	   APP_LOG(APP_LOG_LEVEL_DEBUG, "==> before sending signal");
-		send_signal(0,1);
 		if (!is_received_activity) {
 		  text_layer_set_text(text_layer, "Please Select Activity on Your Phone");
 		  return;
@@ -272,6 +292,7 @@ void menu_select_callback(MenuLayer *menu_layer, MenuIndex *cell_index, void *da
 	 case 1:
 	   _subscribe_activity(SAVE_ACTIVITY);
 	 }
+	 send_signal(START_SIGNAL);
   }
   s_uptime = 0;
   is_dumping = false;
@@ -334,6 +355,17 @@ void window_unload(Window *window) {
   }
 }
 
+void init_message() {
+  // Register callbacks
+  app_message_register_inbox_received(inbox_received_callback);
+  app_message_register_inbox_dropped(inbox_dropped_callback);
+  app_message_register_outbox_failed(outbox_failed_callback);
+  app_message_register_outbox_sent(outbox_sent_callback);
+
+  // Open AppMessage
+  app_message_open(app_message_inbox_size_maximum(), app_message_outbox_size_maximum());
+}
+
 int main(void) {
   window = window_create();
 
@@ -345,11 +377,9 @@ int main(void) {
 
   window_stack_push(window, true );
 
-  // reigster app message to send message to phone.
-  app_message_register_inbox_received(in_received_handler);
-  app_message_open(512, 512);
-
   startTime = time(NULL);
+
+  init_message();
 
   app_event_loop();
 
