@@ -182,8 +182,19 @@ static void menu_draw_header_callback(GContext* ctx, const Layer *cell_layer, ui
 }
 
 static void menu_draw_row_callback(GContext* ctx, const Layer *cell_layer, MenuIndex *cell_index, void *data) {
-  // Use the row to specify which item we'll draw
-  menu_cell_basic_draw(ctx, cell_layer, activity_list[cell_index->row], NULL, menu_icons[cell_index->row]);
+  switch (cell_index->section) {
+    case 0:
+	  menu_cell_basic_draw(ctx, cell_layer, activity_list[cell_index->row], NULL, menu_icons[cell_index->row]);
+      break;
+    case 1:
+	  if (persist_exists(SAVE_ACTIVITY)) {
+		APP_LOG(APP_LOG_LEVEL_DEBUG, "drawing %d", cell_index->row);
+		char buffer[48];
+		persist_read_string(SAVE_ACTIVITY, buffer, sizeof(buffer));
+		menu_cell_basic_draw(ctx, cell_layer, buffer, NULL, menu_icons[SAVE_ACTIVITY]);
+	  }
+      break;
+  }
 }
 
 
