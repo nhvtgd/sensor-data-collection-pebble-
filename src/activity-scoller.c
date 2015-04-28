@@ -17,7 +17,7 @@ static GBitmap *menu_icons[NUM_MENU_ICONS];
 
 static TextLayer *text_layer;
 
-static const char* const activity_list[] = {"Running", "Walking", "Custom Activity"};
+static const char* const activity_list[] = {"Sitting", "Walking", "Custom Activity"};
 
 static const char* const TIME_FORMAT_RECORDING =  "%02d:%02d:%02d Recording";
 
@@ -81,7 +81,7 @@ void send_signal(int signal) {
 
   app_message_outbox_begin(&iter);
   
-  dict_write_int32(iter, signal, 1);
+  dict_write_int32(iter, signal, current_label);
 
   app_message_outbox_send();
 
@@ -245,7 +245,7 @@ static void inbox_received_callback(DictionaryIterator *iter, void *context)
 		if (t->key == SAVE_ACTIVITY) {
 		  APP_LOG(APP_LOG_LEVEL_DEBUG, "write persistent %s", (const char*)t->value->data);
 		  persist_write_string(SAVE_ACTIVITY, (const char*)t->value->data);
-		  num_save_items += 1;
+		  num_save_items = 1;
 		  layer_mark_dirty(menu_layer_get_layer(menu_layer));
 		  menu_layer_reload_data(menu_layer);
 		}
